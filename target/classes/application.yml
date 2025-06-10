@@ -1,0 +1,56 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: credit-service
+  devtools:
+    restart:
+      enabled: true
+      additional-paths: src/main/java
+      exclude: static/**,public/**
+  
+  # Database Configuration
+  datasource:
+    url: jdbc:mysql://localhost:3306/plutus?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: root
+    password: secret
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  
+  # JPA Configuration
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQL8Dialect
+  
+  # Redis Configuration
+  redis:
+    host: localhost
+    port: 6379
+    database: 0
+    timeout: 10000
+
+# Custom Configuration
+credit:
+  reservation:
+    ttl-seconds: 3600  # 1 hour
+  rate-limit:
+    enabled: true
+    window-seconds: 60
+    max-requests: 100
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: method
+    tagsSorter: alpha
+    tryItOutEnabled: true
+    filter: true
+  packages-to-scan: com.looktech.plutus.controller
+  paths-to-match: /api/** 
