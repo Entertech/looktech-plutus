@@ -42,7 +42,8 @@ public class CreditController {
             request.getAmount(),
             request.getSourceType(),
             request.getSourceId(),
-            request.getExpiresAt()
+            request.getExpiresAt(),
+            request.getIdempotencyId()
         ));
     }
 
@@ -90,7 +91,7 @@ public class CreditController {
             request.getAmount(),
             request.getSourceType(),
             request.getSourceId(),
-            request.getRequestId()
+            request.getIdempotencyId()
         ));
     }
 } 

@@ -7,5 +7,5 @@ import java.math.BigDecimal;
 public class CreditSessionRequest {
     private Long userId;
     private BigDecimal maxAmount;
-    private String requestId;
+    private String idempotencyId;
 } 

@@ -17,18 +17,19 @@ public interface CreditService {
      * @param sourceType Source type
      * @param sourceId Source ID
      * @param expiresAt Expiration time
+     * @param idempotencyId Unique ID for idempotency
      * @return Transaction log
      */
-    CreditTransactionLog grantCredit(Long userId, BigDecimal amount, SourceType sourceType, String sourceId, LocalDateTime expiresAt);
+    CreditTransactionLog grantCredit(Long userId, BigDecimal amount, SourceType sourceType, String sourceId, LocalDateTime expiresAt, String idempotencyId);
     
     /**
      * Start a new credit session and reserve credits
      * @param userId User ID
      * @param maxAmount Maximum amount to reserve
-     * @param requestId Unique request ID for idempotency
+     * @param idempotencyId Unique ID for idempotency
      * @return Session ID
      */
-    CreateSessionResponse startSession(Long userId, BigDecimal maxAmount, String requestId);
+    CreateSessionResponse startSession(Long userId, BigDecimal maxAmount, String idempotencyId);
     
     /**
      * Settle a credit session with final amount
@@ -50,10 +51,10 @@ public interface CreditService {
      * @param amount Amount to deduct
      * @param sourceType Source type of the deduction
      * @param sourceId Source ID of the deduction
-     * @param requestId Unique request ID for idempotency
+     * @param idempotencyId Unique ID for idempotency
      * @return Transaction log
      */
-    CreditTransactionLog deductCredit(Long userId, BigDecimal amount, SourceType sourceType, String sourceId, String requestId);
+    CreditTransactionLog deductCredit(Long userId, BigDecimal amount, SourceType sourceType, String sourceId, String idempotencyId);
     
     /**
      * Get available balance for user

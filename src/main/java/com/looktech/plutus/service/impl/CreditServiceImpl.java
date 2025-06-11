@@ -41,46 +41,60 @@ public class CreditServiceImpl implements CreditService {
     @Override
     @Transactional
     @CacheEvict(value = "userBalance", key = "#userId")
-    public CreditTransactionLog grantCredit(Long userId, BigDecimal amount, SourceType sourceType, String sourceId, LocalDateTime expiresAt) {
-        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new CreditException("INVALID_AMOUNT", "Credit amount must be positive");
+    public CreditTransactionLog grantCredit(Long userId, BigDecimal amount, SourceType sourceType, String sourceId, LocalDateTime expiresAt, String idempotencyId) {
+        // 1. Idempotency check
+        String lockKey = String.format("credit:grant:%d:%s", userId, idempotencyId);
+        Boolean acquired = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", 24, TimeUnit.HOURS);
+        if (Boolean.FALSE.equals(acquired)) {
+            return transactionLogRepository.findByTransactionId(idempotencyId)
+                    .orElseThrow(() -> new CreditException("DUPLICATE_REQUEST", "Duplicate idempotency ID"));
         }
 
-        if (expiresAt == null || expiresAt.isBefore(LocalDateTime.now())) {
-            throw new CreditException("INVALID_EXPIRATION", "Expiration time must be later than current time");
+        try {
+            if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new CreditException("INVALID_AMOUNT", "Credit amount must be positive");
+            }
+
+            if (expiresAt == null || expiresAt.isBefore(LocalDateTime.now())) {
+                throw new CreditException("INVALID_EXPIRATION", "Expiration time must be later than current time");
+            }
+
+            // Create credit ledger entry
+            CreditLedger ledger = new CreditLedger();
+            ledger.setUserId(userId);
+            ledger.setRemainingAmount(amount);
+            ledger.setStatus(CreditLedger.CreditStatus.ACTIVE);
+            ledger.setSourceType(sourceType.toString());
+            ledger.setSourceId(sourceId);
+            ledger.setExpiresAt(expiresAt);
+            creditLedgerRepository.save(ledger);
+
+            // Update user credit summary
+            UserCreditSummary summary = userCreditSummaryRepository.findByUserId(userId)
+                    .orElseGet(() -> {
+                        UserCreditSummary newSummary = new UserCreditSummary();
+                        newSummary.setUserId(userId);
+                        newSummary.setTotalBalance(BigDecimal.ZERO);
+                        return newSummary;
+                    });
+            summary.setTotalBalance(summary.getTotalBalance().add(amount));
+            userCreditSummaryRepository.save(summary);
+
+            // Record transaction log
+            CreditTransactionLog log = new CreditTransactionLog();
+            log.setUserId(userId);
+            log.setTransactionId(idempotencyId);
+            log.setType(CreditTransactionLog.TransactionType.GRANT);
+            log.setAmount(amount);
+            log.setSourceType(sourceType.toString());
+            log.setSourceId(sourceId);
+            log.setCreditId(ledger.getId());
+            return transactionLogRepository.save(log);
+
+        } catch (Exception e) {
+            redisTemplate.delete(lockKey);
+            throw e;
         }
-
-        // Create credit ledger entry
-        CreditLedger ledger = new CreditLedger();
-        ledger.setUserId(userId);
-        ledger.setRemainingAmount(amount);
-        ledger.setStatus(CreditLedger.CreditStatus.ACTIVE);
-        ledger.setSourceType(sourceType.toString());
-        ledger.setSourceId(sourceId);
-        ledger.setExpiresAt(expiresAt);
-        creditLedgerRepository.save(ledger);
-
-        // Update user credit summary
-        UserCreditSummary summary = userCreditSummaryRepository.findByUserId(userId)
-                .orElseGet(() -> {
-                    UserCreditSummary newSummary = new UserCreditSummary();
-                    newSummary.setUserId(userId);
-                    newSummary.setTotalBalance(BigDecimal.ZERO);
-                    return newSummary;
-                });
-        summary.setTotalBalance(summary.getTotalBalance().add(amount));
-        userCreditSummaryRepository.save(summary);
-
-        // Record transaction log
-        CreditTransactionLog log = new CreditTransactionLog();
-        log.setUserId(userId);
-        log.setTransactionId(UUID.randomUUID().toString());
-        log.setType(CreditTransactionLog.TransactionType.GRANT);
-        log.setAmount(amount);
-        log.setSourceType(sourceType.toString());
-        log.setSourceId(sourceId);
-        log.setCreditId(ledger.getId());
-        return transactionLogRepository.save(log);
     }
 
 
@@ -116,14 +130,14 @@ public class CreditServiceImpl implements CreditService {
     @Override
     @Transactional
     @CacheEvict(value = "userBalance", key = "T(String).valueOf(#userId)")
-    public CreditTransactionLog deductCredit(Long userId, BigDecimal amount, SourceType sourceType, String sourceId, String requestId) {
+    public CreditTransactionLog deductCredit(Long userId, BigDecimal amount, SourceType sourceType, String sourceId, String idempotencyId) {
         // 1. Idempotency check
-        String lockKey = "credit:deduct:" + requestId;
+        String lockKey = String.format("credit:deduct:%d:%s", userId, idempotencyId);
         Boolean acquired = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", 24, TimeUnit.HOURS);
         if (Boolean.FALSE.equals(acquired)) {
-            // If requestId exists, return the existing transaction record
-            return transactionLogRepository.findByTransactionId(requestId)
-                    .orElseThrow(() -> new CreditException("DUPLICATE_REQUEST", "Duplicate request ID"));
+            // If idempotencyId exists, return the existing transaction record
+            return transactionLogRepository.findByTransactionId(idempotencyId)
+                    .orElseThrow(() -> new CreditException("DUPLICATE_REQUEST", "Duplicate idempotency ID"));
         }
 
         try {
@@ -161,7 +175,7 @@ public class CreditServiceImpl implements CreditService {
 
                 // Record consumption details
                 CreditConsumptionDetail detail = new CreditConsumptionDetail();
-                detail.setTransactionId(requestId);
+                detail.setTransactionId(idempotencyId);
                 detail.setLedgerId(ledger.getId());
                 detail.setAmount(deductAmount);
                 consumptionDetailRepository.save(detail);
@@ -178,7 +192,7 @@ public class CreditServiceImpl implements CreditService {
             // 7. Record transaction log
             CreditTransactionLog log = new CreditTransactionLog();
             log.setUserId(userId);
-            log.setTransactionId(requestId);
+            log.setTransactionId(idempotencyId);
             log.setType(CreditTransactionLog.TransactionType.CONSUME);
             log.setAmount(amount);
             log.setSourceType(sourceType.toString());
@@ -186,7 +200,6 @@ public class CreditServiceImpl implements CreditService {
             return transactionLogRepository.save(log);
 
         } catch (Exception e) {
-            // Release lock when exception occurs
             redisTemplate.delete(lockKey);
             throw e;
         }
@@ -195,21 +208,21 @@ public class CreditServiceImpl implements CreditService {
     @Override
     @Transactional
     @CacheEvict(value = "userBalance", key = "T(String).valueOf(#userId)")
-    public CreateSessionResponse startSession(Long userId, BigDecimal maxAmount, String requestId) {
+    public CreateSessionResponse startSession(Long userId, BigDecimal maxAmount, String idempotencyId) {
         // 1. Idempotency check
-        String lockKey = "credit:session:start:" + requestId;
+        String lockKey = String.format("credit:session:start:%d:%s", userId, idempotencyId);
         Boolean acquired = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", 24, TimeUnit.HOURS);
         if (Boolean.FALSE.equals(acquired)) {
-            return transactionLogRepository.findByTransactionId(requestId)
+            return transactionLogRepository.findByTransactionId(idempotencyId)
                     .map(log -> {
                         CreateSessionResponse response = new CreateSessionResponse();
                         response.setSessionId(log.getSourceId());
                         response.setUserId(log.getUserId());
                         response.setAmount(log.getAmount());
-                        response.setRequestId(requestId);
+                        response.setRequestId(idempotencyId);
                         return response;
                     })
-                    .orElseThrow(() -> new CreditException("DUPLICATE_REQUEST", "Duplicate request ID"));
+                    .orElseThrow(() -> new CreditException("DUPLICATE_REQUEST", "Duplicate idempotency ID"));
         }
 
         try {
@@ -232,7 +245,7 @@ public class CreditServiceImpl implements CreditService {
             freeze.setUserId(userId);
             freeze.setSessionId(sessionId);
             freeze.setAmount(maxAmount);
-            freeze.setRequestId(requestId);
+            freeze.setRequestId(idempotencyId);
             freeze.setStatus(CreditFreeze.FreezeStatus.ACTIVE);
             freeze.setExpiresAt(LocalDateTime.now().plusHours(24)); // Set freeze expiration time
             freeze.setCreatedAt(LocalDateTime.now());
@@ -241,7 +254,7 @@ public class CreditServiceImpl implements CreditService {
             // 6. Record reservation transaction
             CreditTransactionLog log = new CreditTransactionLog();
             log.setUserId(userId);
-            log.setTransactionId(requestId);
+            log.setTransactionId(idempotencyId);
             log.setType(CreditTransactionLog.TransactionType.RESERVE);
             log.setAmount(maxAmount);
             log.setSourceType("SESSION");
@@ -253,7 +266,7 @@ public class CreditServiceImpl implements CreditService {
             response.setSessionId(sessionId);
             response.setUserId(userId);
             response.setAmount(maxAmount);
-            response.setRequestId(requestId);
+            response.setRequestId(idempotencyId);
             return response;
 
         } catch (Exception e) {
@@ -285,8 +298,8 @@ public class CreditServiceImpl implements CreditService {
             if (finalAmount.compareTo(freeze.getAmount()) > 0) {
                 log.error("Final amount exceeds frozen amount: finalAmount={}, freezeAmount={}, sessionId={}", finalAmount, freeze.getAmount(), sessionId);
                 finalAmount=freeze.getAmount();
+                freeze.setAmount(finalAmount);
             }
-
             // 4. Update freeze status
             freeze.setStatus(CreditFreeze.FreezeStatus.CONSUMED);
             creditFreezeRepository.save(freeze);
@@ -360,11 +373,18 @@ public class CreditServiceImpl implements CreditService {
             CreditFreeze freeze = creditFreezeRepository.findBySessionId(sessionId)
                     .orElseThrow(() -> new CreditException("SESSION_NOT_FOUND", "Session not found"));
 
-            // 3. Update freeze status
+            // 3. Check session status
+            if (freeze.getStatus() != CreditFreeze.FreezeStatus.ACTIVE) {
+                log.warn("Cannot cancel session: sessionId={}, currentStatus={}", sessionId, freeze.getStatus());
+                throw new CreditException("INVALID_SESSION_STATUS", 
+                    String.format("Cannot cancel session with status: %s", freeze.getStatus()));
+            }
+
+            // 4. Update freeze status
             freeze.setStatus(CreditFreeze.FreezeStatus.CANCELLED);
             creditFreezeRepository.save(freeze);
 
-            // 4. Record cancellation transaction
+            // 5. Record cancellation transaction
             String transactionId = UUID.randomUUID().toString();
             log.info("Starting credit session cancellation: sessionId={}, transactionId={}", sessionId, transactionId);
             

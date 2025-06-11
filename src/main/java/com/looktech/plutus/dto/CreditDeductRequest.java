@@ -10,5 +10,5 @@ public class CreditDeductRequest {
     private BigDecimal amount;
     private SourceType sourceType;
     private String sourceId;
-    private String requestId;
+    private String idempotencyId;
 } 

@@ -3,7 +3,6 @@ package com.looktech.plutus.controller;
 import com.looktech.plutus.domain.CreditTransactionLog;
 import com.looktech.plutus.dto.CreditSessionRequest;
 import com.looktech.plutus.dto.CreditSessionSettleRequest;
-import com.looktech.plutus.dto.CreditSessionCancelRequest;
 import com.looktech.plutus.service.CreditService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -36,7 +35,7 @@ public class CreditSessionController {
         return ResponseEntity.ok(creditService.startSession(
             request.getUserId(),
             request.getMaxAmount(),
-            request.getRequestId()
+            request.getIdempotencyId()
         ));
     }
 

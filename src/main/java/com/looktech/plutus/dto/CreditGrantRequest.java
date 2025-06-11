@@ -24,4 +24,7 @@ public class CreditGrantRequest {
 
     @Schema(description = "Expiration time of the credit")
     private LocalDateTime expiresAt;
+
+    @Schema(description = "Unique ID for idempotency")
+    private String idempotencyId;
 } 
