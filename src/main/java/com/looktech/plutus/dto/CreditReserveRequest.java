@@ -14,6 +14,4 @@ public class CreditReserveRequest {
     @Schema(description = "Credit amount to reserve")
     private BigDecimal amount;
 
-    @Schema(description = "Transaction ID for tracking")
-    private String transactionId;
 } 

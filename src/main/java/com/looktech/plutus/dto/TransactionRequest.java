@@ -6,6 +6,6 @@ import lombok.Data;
 @Data
 @Schema(description = "Transaction request")
 public class TransactionRequest {
-    @Schema(description = "Transaction ID")
+    @Schema(description = "Transaction ID", required = true)
     private String transactionId;
 } 

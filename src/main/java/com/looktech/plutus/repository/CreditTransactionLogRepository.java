@@ -14,4 +14,6 @@ public interface CreditTransactionLogRepository extends JpaRepository<CreditTran
     Optional<CreditTransactionLog> findByTransactionId(String transactionId);
     
     Page<CreditTransactionLog> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);
+    
+    Optional<CreditTransactionLog> findBySourceId(String sourceId);
 } 

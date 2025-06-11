@@ -1,12 +1,8 @@
 package com.looktech.plutus.controller;
 
 import com.looktech.plutus.annotation.RateLimit;
-import com.looktech.plutus.domain.CreditLedger;
 import com.looktech.plutus.domain.CreditTransactionLog;
 import com.looktech.plutus.dto.CreditGrantRequest;
-import com.looktech.plutus.dto.CreditReserveRequest;
-import com.looktech.plutus.dto.TransactionRequest;
-import com.looktech.plutus.dto.TransactionHistoryRequest;
 import com.looktech.plutus.service.CreditService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -21,7 +17,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/credits")
@@ -50,50 +45,6 @@ public class CreditController {
         ));
     }
 
-    @Operation(summary = "Reserve credits", description = "Reserve credits for a user with specified amount")
-    @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "Credits reserved successfully",
-                    content = @Content(schema = @Schema(implementation = List.class))),
-        @ApiResponse(responseCode = "400", description = "Invalid input parameters"),
-        @ApiResponse(responseCode = "409", description = "Insufficient balance"),
-        @ApiResponse(responseCode = "429", description = "Rate limit exceeded")
-    })
-    @PostMapping("/reserve")
-    @RateLimit(key = "reserve_credit", limit = 200, period = 60)
-    public ResponseEntity<List<CreditLedger>> reserveCredit(@RequestBody CreditReserveRequest request) {
-        return ResponseEntity.ok(creditService.reserveCredit(
-            request.getUserId(),
-            request.getAmount(),
-            request.getTransactionId()
-        ));
-    }
-
-    @Operation(summary = "Cancel credit reservation", description = "Cancel a previously reserved credit transaction")
-    @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "Reservation cancelled successfully"),
-        @ApiResponse(responseCode = "404", description = "Transaction not found"),
-        @ApiResponse(responseCode = "429", description = "Rate limit exceeded")
-    })
-    @PostMapping("/cancel")
-    @RateLimit(key = "cancel_reservation", limit = 200, period = 60)
-    public ResponseEntity<Void> cancelReservation(@RequestBody TransactionRequest request) {
-        creditService.cancelReservation(request.getTransactionId());
-        return ResponseEntity.ok().build();
-    }
-
-    @Operation(summary = "Settle credit transaction", description = "Settle a previously reserved credit transaction")
-    @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "Transaction settled successfully"),
-        @ApiResponse(responseCode = "404", description = "Transaction not found"),
-        @ApiResponse(responseCode = "429", description = "Rate limit exceeded")
-    })
-    @PostMapping("/settle")
-    @RateLimit(key = "settle_credit", limit = 200, period = 60)
-    public ResponseEntity<Void> settleCredit(@RequestBody TransactionRequest request) {
-        creditService.settleCredit(request.getTransactionId());
-        return ResponseEntity.ok().build();
-    }
-
     @Operation(summary = "Get user's available balance", description = "Get the available credit balance for a user")
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Balance retrieved successfully",
@@ -117,7 +68,27 @@ public class CreditController {
     @RateLimit(key = "get_transactions", limit = 500, period = 60)
     public ResponseEntity<Page<CreditTransactionLog>> getTransactionHistory(
             @Parameter(description = "User ID") @PathVariable Long userId,
-            @RequestBody TransactionHistoryRequest request) {
-        return ResponseEntity.ok(creditService.getTransactionHistory(userId, request.getPage(), request.getSize()));
+            @Parameter(description = "Page number (0-based)") @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size") @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(creditService.getTransactionHistory(userId, page, size));
+    }
+
+    @Operation(summary = "Deduct credits synchronously", description = "Deduct credits from user's balance immediately")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Credits deducted successfully",
+                    content = @Content(schema = @Schema(implementation = CreditTransactionLog.class))),
+        @ApiResponse(responseCode = "400", description = "Invalid input parameters"),
+        @ApiResponse(responseCode = "409", description = "Insufficient balance"),
+        @ApiResponse(responseCode = "429", description = "Rate limit exceeded")
+    })
+    @PostMapping("/deduct")
+    @RateLimit(key = "deduct_credit", limit = 200, period = 60)
+    public ResponseEntity<CreditTransactionLog> deductCredit(
+            @Parameter(description = "User ID") @RequestParam Long userId,
+            @Parameter(description = "Amount to deduct") @RequestParam BigDecimal amount,
+            @Parameter(description = "Source type") @RequestParam String sourceType,
+            @Parameter(description = "Source ID") @RequestParam String sourceId,
+            @Parameter(description = "Request ID for idempotency") @RequestParam String requestId) {
+        return ResponseEntity.ok(creditService.deductCredit(userId, amount, sourceType, sourceId, requestId));
     }
 } 

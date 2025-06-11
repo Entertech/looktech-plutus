@@ -9,7 +9,9 @@ import java.time.LocalDateTime;
 
 @Data
 @Entity
-@Table(name = "credit_transaction_logs")
+@Table(name = "credit_transaction_logs", indexes = {
+    @Index(name = "idx_transaction_id", columnList = "transaction_id")
+})
 public class CreditTransactionLog {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -18,7 +20,7 @@ public class CreditTransactionLog {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
-    @Column(name = "transaction_id", nullable = false, unique = true)
+    @Column(name = "transaction_id", nullable = false)
     private String transactionId;
 
     @Column(name = "type", nullable = false)
@@ -33,6 +35,9 @@ public class CreditTransactionLog {
 
     @Column(name = "source_id")
     private String sourceId;
+
+    @Column(name = "credit_id")
+    private Long creditId;
 
     @Column(name = "description")
     private String description;

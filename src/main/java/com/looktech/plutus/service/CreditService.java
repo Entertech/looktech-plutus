@@ -1,6 +1,5 @@
 package com.looktech.plutus.service;
 
-import com.looktech.plutus.domain.CreditLedger;
 import com.looktech.plutus.domain.CreditTransactionLog;
 import org.springframework.data.domain.Page;
 
@@ -22,35 +21,50 @@ public interface CreditService {
     CreditTransactionLog grantCredit(Long userId, BigDecimal amount, String sourceType, String sourceId, LocalDateTime expiresAt);
     
     /**
-     * Reserve credits
+     * Start a new credit session and reserve credits
      * @param userId User ID
-     * @param amount Credit amount
-     * @param transactionId Transaction ID
-     * @return List of reserved credit ledgers
+     * @param maxAmount Maximum amount to reserve
+     * @param requestId Unique request ID for idempotency
+     * @return Session ID
      */
-    List<CreditLedger> reserveCredit(Long userId, BigDecimal amount, String transactionId);
+    String startSession(Long userId, BigDecimal maxAmount, String requestId);
     
     /**
-     * Cancel credit reservation
-     * @param transactionId Transaction ID
+     * Settle a credit session with final amount
+     * @param sessionId Session ID
+     * @param finalAmount Final amount to consume
+     * @param requestId Unique request ID for idempotency
+     * @return Transaction log
      */
-    void cancelReservation(String transactionId);
+    CreditTransactionLog settleSession(String sessionId, BigDecimal finalAmount, String requestId);
     
     /**
-     * Settle credit transaction
-     * @param transactionId Transaction ID
+     * Cancel a credit session and release reserved credits
+     * @param sessionId Session ID
+     * @param requestId Unique request ID for idempotency
      */
-    void settleCredit(String transactionId);
+    void cancelSession(String sessionId, String requestId);
     
     /**
-     * Get user's available credit balance
+     * Deduct credits synchronously
+     * @param userId User ID
+     * @param amount Amount to deduct
+     * @param sourceType Source type of the deduction
+     * @param sourceId Source ID of the deduction
+     * @param requestId Unique request ID for idempotency
+     * @return Transaction log
+     */
+    CreditTransactionLog deductCredit(Long userId, BigDecimal amount, String sourceType, String sourceId, String requestId);
+    
+    /**
+     * Get available balance for user
      * @param userId User ID
      * @return Available balance
      */
     BigDecimal getAvailableBalance(Long userId);
     
     /**
-     * Get user's transaction history
+     * Get transaction history for user
      * @param userId User ID
      * @param page Page number
      * @param size Page size
