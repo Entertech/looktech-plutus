@@ -1,0 +1,20 @@
+# IDE files
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Build files
+target/
+build/
+out/
+
+# Log files
+*.log
+
+# Session files
+plutus.session.sql
+
+# OS files
+.DS_Store
+Thumbs.db 
