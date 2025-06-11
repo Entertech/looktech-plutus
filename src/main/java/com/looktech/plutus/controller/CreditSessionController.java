@@ -15,6 +15,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.looktech.plutus.domain.CreateSessionResponse;
 
 @RestController
 @RequestMapping("/api/v1/sessions")
@@ -26,13 +27,12 @@ public class CreditSessionController {
     @Operation(summary = "Start a credit session", description = "Start a new credit session and reserve credits")
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Session started successfully",
-                    content = @Content(schema = @Schema(implementation = String.class))),
+                    content = @Content(schema = @Schema(implementation = CreateSessionResponse.class))),
         @ApiResponse(responseCode = "400", description = "Invalid input parameters"),
-        @ApiResponse(responseCode = "409", description = "Insufficient balance"),
-        @ApiResponse(responseCode = "429", description = "Rate limit exceeded")
+        @ApiResponse(responseCode = "409", description = "Insufficient balance")
     })
     @PostMapping("/start")
-    public ResponseEntity<String> startSession(@RequestBody CreditSessionRequest request) {
+    public ResponseEntity<CreateSessionResponse> startSession(@RequestBody CreditSessionRequest request) {
         return ResponseEntity.ok(creditService.startSession(
             request.getUserId(),
             request.getMaxAmount(),
@@ -45,31 +45,24 @@ public class CreditSessionController {
         @ApiResponse(responseCode = "200", description = "Session settled successfully",
                     content = @Content(schema = @Schema(implementation = CreditTransactionLog.class))),
         @ApiResponse(responseCode = "400", description = "Invalid input parameters"),
-        @ApiResponse(responseCode = "404", description = "Session not found"),
-        @ApiResponse(responseCode = "429", description = "Rate limit exceeded")
+        @ApiResponse(responseCode = "404", description = "Session not found")
     })
     @PostMapping("/{sessionId}/settle")
     public ResponseEntity<CreditTransactionLog> settleSession(
             @Parameter(description = "Session ID") @PathVariable String sessionId,
             @RequestBody CreditSessionSettleRequest request) {
-        return ResponseEntity.ok(creditService.settleSession(
-            sessionId,
-            request.getFinalAmount(),
-            request.getRequestId()
-        ));
+        return ResponseEntity.ok(creditService.settleSession(sessionId, request.getFinalAmount()));
     }
 
     @Operation(summary = "Cancel a credit session", description = "Cancel a credit session and release reserved credits")
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Session cancelled successfully"),
-        @ApiResponse(responseCode = "404", description = "Session not found"),
-        @ApiResponse(responseCode = "429", description = "Rate limit exceeded")
+        @ApiResponse(responseCode = "404", description = "Session not found")
     })
     @PostMapping("/{sessionId}/cancel")
-    public ResponseEntity<Void> cancelSession(
-            @Parameter(description = "Session ID") @PathVariable String sessionId,
-            @RequestBody CreditSessionCancelRequest request) {
-        creditService.cancelSession(sessionId, request.getRequestId());
-        return ResponseEntity.ok().build();
+    public ResponseEntity<Boolean> cancelSession(
+            @Parameter(description = "Session ID") @PathVariable String sessionId) {
+        creditService.cancelSession(sessionId);
+        return ResponseEntity.ok(true);
     }
 } 

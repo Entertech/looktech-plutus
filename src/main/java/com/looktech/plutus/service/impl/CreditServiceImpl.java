@@ -5,6 +5,7 @@ import com.looktech.plutus.domain.CreditTransactionLog;
 import com.looktech.plutus.domain.UserCreditSummary;
 import com.looktech.plutus.domain.CreditConsumptionDetail;
 import com.looktech.plutus.domain.CreditFreeze;
+import com.looktech.plutus.domain.CreateSessionResponse;
 import com.looktech.plutus.enums.SourceType;
 import com.looktech.plutus.exception.CreditException;
 import com.looktech.plutus.repository.*;
@@ -23,8 +24,10 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class CreditServiceImpl implements CreditService {
 
@@ -82,7 +85,7 @@ public class CreditServiceImpl implements CreditService {
 
 
     @Override
-    @Cacheable(value = "userBalance", key = "#userId")
+    @Cacheable(value = "userBalance", key = "T(String).valueOf(#userId)")
     public BigDecimal getAvailableBalance(Long userId) {
         // Get all non-expired credits with ACTIVE status
         BigDecimal totalBalance = creditLedgerRepository
@@ -112,7 +115,7 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     @Transactional
-    @CacheEvict(value = "userBalance", key = "#userId")
+    @CacheEvict(value = "userBalance", key = "T(String).valueOf(#userId)")
     public CreditTransactionLog deductCredit(Long userId, BigDecimal amount, SourceType sourceType, String sourceId, String requestId) {
         // 1. Idempotency check
         String lockKey = "credit:deduct:" + requestId;
@@ -191,14 +194,21 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     @Transactional
-    @CacheEvict(value = "userBalance", key = "#result.userId")
-    public String startSession(Long userId, BigDecimal maxAmount, String requestId) {
+    @CacheEvict(value = "userBalance", key = "T(String).valueOf(#userId)")
+    public CreateSessionResponse startSession(Long userId, BigDecimal maxAmount, String requestId) {
         // 1. Idempotency check
         String lockKey = "credit:session:start:" + requestId;
         Boolean acquired = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", 24, TimeUnit.HOURS);
         if (Boolean.FALSE.equals(acquired)) {
             return transactionLogRepository.findByTransactionId(requestId)
-                    .map(log -> log.getSourceId())
+                    .map(log -> {
+                        CreateSessionResponse response = new CreateSessionResponse();
+                        response.setSessionId(log.getSourceId());
+                        response.setUserId(log.getUserId());
+                        response.setAmount(log.getAmount());
+                        response.setRequestId(requestId);
+                        return response;
+                    })
                     .orElseThrow(() -> new CreditException("DUPLICATE_REQUEST", "Duplicate request ID"));
         }
 
@@ -238,7 +248,13 @@ public class CreditServiceImpl implements CreditService {
             log.setSourceId(sessionId);
             transactionLogRepository.save(log);
 
-            return sessionId;
+            // 7. Create and return response object
+            CreateSessionResponse response = new CreateSessionResponse();
+            response.setSessionId(sessionId);
+            response.setUserId(userId);
+            response.setAmount(maxAmount);
+            response.setRequestId(requestId);
+            return response;
 
         } catch (Exception e) {
             redisTemplate.delete(lockKey);
@@ -248,14 +264,13 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     @Transactional
-    @CacheEvict(value = "userBalance", key = "#result.userId")
-    public CreditTransactionLog settleSession(String sessionId, BigDecimal finalAmount, String requestId) {
+    @CacheEvict(value = "userBalance", key = "T(String).valueOf(#freeze.userId)", condition = "#freeze != null")
+    public CreditTransactionLog settleSession(String sessionId, BigDecimal finalAmount) {
         // 1. Idempotency check
-        String lockKey = "credit:session:settle:" + requestId;
+        String lockKey = "credit:session:settle:" + sessionId;
         Boolean acquired = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", 24, TimeUnit.HOURS);
         if (Boolean.FALSE.equals(acquired)) {
-            return transactionLogRepository.findByTransactionId(requestId)
-                    .orElseThrow(() -> new CreditException("DUPLICATE_REQUEST", "Duplicate request ID"));
+            throw new CreditException("DUPLICATE_OPERATION", "Session already settled");
         }
 
         try {
@@ -268,7 +283,8 @@ public class CreditServiceImpl implements CreditService {
                 throw new CreditException("INVALID_AMOUNT", "Final amount must be positive");
             }
             if (finalAmount.compareTo(freeze.getAmount()) > 0) {
-                throw new CreditException("INVALID_AMOUNT", "Final amount exceeds frozen amount");
+                log.error("Final amount exceeds frozen amount: finalAmount={}, freezeAmount={}, sessionId={}", finalAmount, freeze.getAmount(), sessionId);
+                finalAmount=freeze.getAmount();
             }
 
             // 4. Update freeze status
@@ -282,6 +298,9 @@ public class CreditServiceImpl implements CreditService {
                             CreditLedger.CreditStatus.ACTIVE,
                             LocalDateTime.now());
 
+            String transactionId = UUID.randomUUID().toString();
+            log.info("Starting credit settlement: sessionId={}, transactionId={}, finalAmount={}", sessionId, transactionId, finalAmount);
+            
             BigDecimal remainingAmount = finalAmount;
             for (CreditLedger ledger : availableLedgers) {
                 if (remainingAmount.compareTo(BigDecimal.ZERO) <= 0) {
@@ -297,7 +316,7 @@ public class CreditServiceImpl implements CreditService {
 
                 // Record consumption details
                 CreditConsumptionDetail detail = new CreditConsumptionDetail();
-                detail.setTransactionId(requestId);
+                detail.setTransactionId(transactionId);
                 detail.setLedgerId(ledger.getId());
                 detail.setAmount(deductAmount);
                 consumptionDetailRepository.save(detail);
@@ -308,14 +327,18 @@ public class CreditServiceImpl implements CreditService {
             // 6. Record consumption transaction
             CreditTransactionLog consumeLog = new CreditTransactionLog();
             consumeLog.setUserId(freeze.getUserId());
-            consumeLog.setTransactionId(requestId);
+            consumeLog.setTransactionId(transactionId);
             consumeLog.setType(CreditTransactionLog.TransactionType.CONSUME);
             consumeLog.setAmount(finalAmount);
             consumeLog.setSourceType("SESSION");
             consumeLog.setSourceId(sessionId);
-            return transactionLogRepository.save(consumeLog);
+            CreditTransactionLog savedLog = transactionLogRepository.save(consumeLog);
+            
+            log.info("Credit settlement completed: sessionId={}, transactionId={}, finalAmount={}", sessionId, transactionId, finalAmount);
+            return savedLog;
 
         } catch (Exception e) {
+            log.error("Error during credit settlement: sessionId={}, error={}", sessionId, e.getMessage(), e);
             redisTemplate.delete(lockKey);
             throw e;
         }
@@ -323,10 +346,10 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     @Transactional
-    @CacheEvict(value = "userBalance", key = "#result.userId")
-    public void cancelSession(String sessionId, String requestId) {
+    @CacheEvict(value = "userBalance", key = "T(String).valueOf(#freeze.userId)", condition = "#freeze != null")
+    public void cancelSession(String sessionId) {
         // 1. Idempotency check
-        String lockKey = "credit:session:cancel:" + requestId;
+        String lockKey = "credit:session:cancel:" + sessionId;
         Boolean acquired = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", 24, TimeUnit.HOURS);
         if (Boolean.FALSE.equals(acquired)) {
             return;
@@ -342,16 +365,22 @@ public class CreditServiceImpl implements CreditService {
             creditFreezeRepository.save(freeze);
 
             // 4. Record cancellation transaction
+            String transactionId = UUID.randomUUID().toString();
+            log.info("Starting credit session cancellation: sessionId={}, transactionId={}", sessionId, transactionId);
+            
             CreditTransactionLog cancelLog = new CreditTransactionLog();
             cancelLog.setUserId(freeze.getUserId());
-            cancelLog.setTransactionId(requestId);
+            cancelLog.setTransactionId(transactionId);
             cancelLog.setType(CreditTransactionLog.TransactionType.CANCEL);
             cancelLog.setAmount(freeze.getAmount());
             cancelLog.setSourceType("SESSION");
             cancelLog.setSourceId(sessionId);
             transactionLogRepository.save(cancelLog);
+            
+            log.info("Credit session cancellation completed: sessionId={}, transactionId={}", sessionId, transactionId);
 
         } catch (Exception e) {
+            log.error("Error during credit session cancellation: sessionId={}, error={}", sessionId, e.getMessage(), e);
             redisTemplate.delete(lockKey);
             throw e;
         }

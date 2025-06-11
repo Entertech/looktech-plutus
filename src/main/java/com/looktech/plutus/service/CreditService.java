@@ -1,6 +1,7 @@
 package com.looktech.plutus.service;
 
 import com.looktech.plutus.domain.CreditTransactionLog;
+import com.looktech.plutus.domain.CreateSessionResponse;
 import com.looktech.plutus.enums.SourceType;
 import org.springframework.data.domain.Page;
 
@@ -27,23 +28,21 @@ public interface CreditService {
      * @param requestId Unique request ID for idempotency
      * @return Session ID
      */
-    String startSession(Long userId, BigDecimal maxAmount, String requestId);
+    CreateSessionResponse startSession(Long userId, BigDecimal maxAmount, String requestId);
     
     /**
      * Settle a credit session with final amount
      * @param sessionId Session ID
      * @param finalAmount Final amount to consume
-     * @param requestId Unique request ID for idempotency
      * @return Transaction log
      */
-    CreditTransactionLog settleSession(String sessionId, BigDecimal finalAmount, String requestId);
+    CreditTransactionLog settleSession(String sessionId, BigDecimal finalAmount);
     
     /**
      * Cancel a credit session and release reserved credits
      * @param sessionId Session ID
-     * @param requestId Unique request ID for idempotency
      */
-    void cancelSession(String sessionId, String requestId);
+    void cancelSession(String sessionId);
     
     /**
      * Deduct credits synchronously
