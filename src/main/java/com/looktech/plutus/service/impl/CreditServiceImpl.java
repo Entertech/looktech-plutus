@@ -4,11 +4,10 @@ import com.looktech.plutus.domain.CreditLedger;
 import com.looktech.plutus.domain.CreditTransactionLog;
 import com.looktech.plutus.domain.UserCreditSummary;
 import com.looktech.plutus.domain.CreditConsumptionDetail;
+import com.looktech.plutus.domain.CreditFreeze;
+import com.looktech.plutus.enums.SourceType;
 import com.looktech.plutus.exception.CreditException;
-import com.looktech.plutus.repository.CreditLedgerRepository;
-import com.looktech.plutus.repository.CreditTransactionLogRepository;
-import com.looktech.plutus.repository.UserCreditSummaryRepository;
-import com.looktech.plutus.repository.CreditConsumptionDetailRepository;
+import com.looktech.plutus.repository.*;
 import com.looktech.plutus.service.CreditService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
@@ -33,12 +32,13 @@ public class CreditServiceImpl implements CreditService {
     private final CreditLedgerRepository creditLedgerRepository;
     private final CreditTransactionLogRepository transactionLogRepository;
     private final CreditConsumptionDetailRepository consumptionDetailRepository;
+    private final CreditFreezeRepository creditFreezeRepository;
     private final RedisTemplate<String, String> redisTemplate;
 
     @Override
     @Transactional
     @CacheEvict(value = "userBalance", key = "#userId")
-    public CreditTransactionLog grantCredit(Long userId, BigDecimal amount, String sourceType, String sourceId, LocalDateTime expiresAt) {
+    public CreditTransactionLog grantCredit(Long userId, BigDecimal amount, SourceType sourceType, String sourceId, LocalDateTime expiresAt) {
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new CreditException("INVALID_AMOUNT", "Credit amount must be positive");
         }
@@ -52,7 +52,7 @@ public class CreditServiceImpl implements CreditService {
         ledger.setUserId(userId);
         ledger.setRemainingAmount(amount);
         ledger.setStatus(CreditLedger.CreditStatus.ACTIVE);
-        ledger.setSourceType(sourceType);
+        ledger.setSourceType(sourceType.toString());
         ledger.setSourceId(sourceId);
         ledger.setExpiresAt(expiresAt);
         creditLedgerRepository.save(ledger);
@@ -74,7 +74,7 @@ public class CreditServiceImpl implements CreditService {
         log.setTransactionId(UUID.randomUUID().toString());
         log.setType(CreditTransactionLog.TransactionType.GRANT);
         log.setAmount(amount);
-        log.setSourceType(sourceType);
+        log.setSourceType(sourceType.toString());
         log.setSourceId(sourceId);
         log.setCreditId(ledger.getId());
         return transactionLogRepository.save(log);
@@ -84,12 +84,23 @@ public class CreditServiceImpl implements CreditService {
     @Override
     @Cacheable(value = "userBalance", key = "#userId")
     public BigDecimal getAvailableBalance(Long userId) {
-        return creditLedgerRepository
+        // Get all non-expired credits with ACTIVE status
+        BigDecimal totalBalance = creditLedgerRepository
                 .sumRemainingAmountByUserIdAndStatusAndNotExpired(
                         userId,
                         CreditLedger.CreditStatus.ACTIVE,
                         LocalDateTime.now())
                 .orElse(BigDecimal.ZERO);
+                
+        // Subtract all non-expired frozen credits
+        BigDecimal frozenAmount = creditFreezeRepository
+                .sumAmountByUserIdAndStatusAndNotExpired(
+                        userId,
+                        CreditFreeze.FreezeStatus.ACTIVE,
+                        LocalDateTime.now())
+                .orElse(BigDecimal.ZERO);
+                
+        return totalBalance.subtract(frozenAmount);
     }
 
     @Override
@@ -102,36 +113,36 @@ public class CreditServiceImpl implements CreditService {
     @Override
     @Transactional
     @CacheEvict(value = "userBalance", key = "#userId")
-    public CreditTransactionLog deductCredit(Long userId, BigDecimal amount, String sourceType, String sourceId, String requestId) {
-        // 1. 幂等性检查
+    public CreditTransactionLog deductCredit(Long userId, BigDecimal amount, SourceType sourceType, String sourceId, String requestId) {
+        // 1. Idempotency check
         String lockKey = "credit:deduct:" + requestId;
         Boolean acquired = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", 24, TimeUnit.HOURS);
         if (Boolean.FALSE.equals(acquired)) {
-            // 如果requestId已存在，返回已存在的交易记录
+            // If requestId exists, return the existing transaction record
             return transactionLogRepository.findByTransactionId(requestId)
                     .orElseThrow(() -> new CreditException("DUPLICATE_REQUEST", "Duplicate request ID"));
         }
 
         try {
-            // 2. 参数验证
+            // 2. Parameter validation
             if (amount.compareTo(BigDecimal.ZERO) <= 0) {
                 throw new CreditException("INVALID_AMOUNT", "Credit amount must be positive");
             }
 
-            // 3. 检查余额
+            // 3. Check balance
             BigDecimal availableBalance = getAvailableBalance(userId);
             if (availableBalance.compareTo(amount) < 0) {
                 throw new CreditException("INSUFFICIENT_BALANCE", "Insufficient credit balance");
             }
 
-            // 4. 获取可用的积分批次（按过期时间排序）
+            // 4. Get available credit batches (sorted by expiration time)
             List<CreditLedger> availableLedgers = creditLedgerRepository
                     .findByUserIdAndStatusAndExpiresAtAfterOrderByExpiresAtAsc(
                             userId,
                             CreditLedger.CreditStatus.ACTIVE,
                             LocalDateTime.now());
 
-            // 5. 扣减积分并记录明细
+            // 5. Deduct credits and record details
             BigDecimal remainingAmount = amount;
             for (CreditLedger ledger : availableLedgers) {
                 if (remainingAmount.compareTo(BigDecimal.ZERO) <= 0) {
@@ -145,7 +156,7 @@ public class CreditServiceImpl implements CreditService {
                 }
                 creditLedgerRepository.save(ledger);
 
-                // 记录消费明细
+                // Record consumption details
                 CreditConsumptionDetail detail = new CreditConsumptionDetail();
                 detail.setTransactionId(requestId);
                 detail.setLedgerId(ledger.getId());
@@ -155,24 +166,24 @@ public class CreditServiceImpl implements CreditService {
                 remainingAmount = remainingAmount.subtract(deductAmount);
             }
 
-            // 6. 更新用户总余额
+            // 6. Update user total balance
             UserCreditSummary summary = userCreditSummaryRepository.findByUserId(userId)
                     .orElseThrow(() -> new CreditException("USER_NOT_FOUND", "User credit summary not found"));
             summary.setTotalBalance(summary.getTotalBalance().subtract(amount));
             userCreditSummaryRepository.save(summary);
 
-            // 7. 记录交易日志
+            // 7. Record transaction log
             CreditTransactionLog log = new CreditTransactionLog();
             log.setUserId(userId);
             log.setTransactionId(requestId);
             log.setType(CreditTransactionLog.TransactionType.CONSUME);
             log.setAmount(amount);
-            log.setSourceType(sourceType);
+            log.setSourceType(sourceType.toString());
             log.setSourceId(sourceId);
             return transactionLogRepository.save(log);
 
         } catch (Exception e) {
-            // 发生异常时释放锁
+            // Release lock when exception occurs
             redisTemplate.delete(lockKey);
             throw e;
         }
@@ -180,55 +191,44 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     @Transactional
-    @CacheEvict(value = "userBalance", key = "#userId")
+    @CacheEvict(value = "userBalance", key = "#result.userId")
     public String startSession(Long userId, BigDecimal maxAmount, String requestId) {
-        // 1. 幂等性检查
+        // 1. Idempotency check
         String lockKey = "credit:session:start:" + requestId;
         Boolean acquired = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", 24, TimeUnit.HOURS);
         if (Boolean.FALSE.equals(acquired)) {
-            // 如果requestId已存在，返回已存在的会话ID
             return transactionLogRepository.findByTransactionId(requestId)
-                    .map(log -> log.getSourceId()) // sourceId 存储会话ID
+                    .map(log -> log.getSourceId())
                     .orElseThrow(() -> new CreditException("DUPLICATE_REQUEST", "Duplicate request ID"));
         }
 
         try {
-            // 2. 参数验证
+            // 2. Parameter validation
             if (maxAmount.compareTo(BigDecimal.ZERO) <= 0) {
                 throw new CreditException("INVALID_AMOUNT", "Max amount must be positive");
             }
 
-            // 3. 检查余额
+            // 3. Check available balance
             BigDecimal availableBalance = getAvailableBalance(userId);
             if (availableBalance.compareTo(maxAmount) < 0) {
                 throw new CreditException("INSUFFICIENT_BALANCE", "Insufficient credit balance");
             }
 
-            // 4. 生成会话ID
+            // 4. Generate session ID
             String sessionId = UUID.randomUUID().toString();
 
-            // 5. 预留积分
-            List<CreditLedger> reservedLedgers = creditLedgerRepository
-                    .findByUserIdAndStatusAndExpiresAtAfterOrderByExpiresAtAsc(
-                            userId,
-                            CreditLedger.CreditStatus.ACTIVE,
-                            LocalDateTime.now());
+            // 5. Create freeze record
+            CreditFreeze freeze = new CreditFreeze();
+            freeze.setUserId(userId);
+            freeze.setSessionId(sessionId);
+            freeze.setAmount(maxAmount);
+            freeze.setRequestId(requestId);
+            freeze.setStatus(CreditFreeze.FreezeStatus.ACTIVE);
+            freeze.setExpiresAt(LocalDateTime.now().plusHours(24)); // Set freeze expiration time
+            freeze.setCreatedAt(LocalDateTime.now());
+            creditFreezeRepository.save(freeze);
 
-            BigDecimal remainingAmount = maxAmount;
-            for (CreditLedger ledger : reservedLedgers) {
-                if (remainingAmount.compareTo(BigDecimal.ZERO) <= 0) {
-                    break;
-                }
-
-                BigDecimal reserveAmount = ledger.getRemainingAmount().min(remainingAmount);
-                ledger.setRemainingAmount(ledger.getRemainingAmount().subtract(reserveAmount));
-                ledger.setStatus(CreditLedger.CreditStatus.RESERVED);
-                creditLedgerRepository.save(ledger);
-
-                remainingAmount = remainingAmount.subtract(reserveAmount);
-            }
-
-            // 6. 记录预留交易
+            // 6. Record reservation transaction
             CreditTransactionLog log = new CreditTransactionLog();
             log.setUserId(userId);
             log.setTransactionId(requestId);
@@ -250,7 +250,7 @@ public class CreditServiceImpl implements CreditService {
     @Transactional
     @CacheEvict(value = "userBalance", key = "#result.userId")
     public CreditTransactionLog settleSession(String sessionId, BigDecimal finalAmount, String requestId) {
-        // 1. 幂等性检查
+        // 1. Idempotency check
         String lockKey = "credit:session:settle:" + requestId;
         Boolean acquired = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", 24, TimeUnit.HOURS);
         if (Boolean.FALSE.equals(acquired)) {
@@ -259,33 +259,55 @@ public class CreditServiceImpl implements CreditService {
         }
 
         try {
-            // 2. 获取预留交易记录
-            CreditTransactionLog reserveLog = transactionLogRepository.findBySourceId(sessionId)
+            // 2. Get freeze record
+            CreditFreeze freeze = creditFreezeRepository.findBySessionId(sessionId)
                     .orElseThrow(() -> new CreditException("SESSION_NOT_FOUND", "Session not found"));
 
-            // 3. 验证金额
+            // 3. Validate amount
             if (finalAmount.compareTo(BigDecimal.ZERO) <= 0) {
                 throw new CreditException("INVALID_AMOUNT", "Final amount must be positive");
             }
-            if (finalAmount.compareTo(reserveLog.getAmount()) > 0) {
-                throw new CreditException("INVALID_AMOUNT", "Final amount exceeds reserved amount");
+            if (finalAmount.compareTo(freeze.getAmount()) > 0) {
+                throw new CreditException("INVALID_AMOUNT", "Final amount exceeds frozen amount");
             }
 
-            // 4. 更新预留积分状态为已消费
-            List<CreditLedger> reservedLedgers = creditLedgerRepository
+            // 4. Update freeze status
+            freeze.setStatus(CreditFreeze.FreezeStatus.CONSUMED);
+            creditFreezeRepository.save(freeze);
+
+            // 5. Actually deduct credits
+            List<CreditLedger> availableLedgers = creditLedgerRepository
                     .findByUserIdAndStatusAndExpiresAtAfterOrderByExpiresAtAsc(
-                            reserveLog.getUserId(),
-                            CreditLedger.CreditStatus.RESERVED,
+                            freeze.getUserId(),
+                            CreditLedger.CreditStatus.ACTIVE,
                             LocalDateTime.now());
 
-            for (CreditLedger ledger : reservedLedgers) {
-                ledger.setStatus(CreditLedger.CreditStatus.CONSUMED);
+            BigDecimal remainingAmount = finalAmount;
+            for (CreditLedger ledger : availableLedgers) {
+                if (remainingAmount.compareTo(BigDecimal.ZERO) <= 0) {
+                    break;
+                }
+
+                BigDecimal deductAmount = ledger.getRemainingAmount().min(remainingAmount);
+                ledger.setRemainingAmount(ledger.getRemainingAmount().subtract(deductAmount));
+                if (ledger.getRemainingAmount().compareTo(BigDecimal.ZERO) == 0) {
+                    ledger.setStatus(CreditLedger.CreditStatus.CONSUMED);
+                }
                 creditLedgerRepository.save(ledger);
+
+                // Record consumption details
+                CreditConsumptionDetail detail = new CreditConsumptionDetail();
+                detail.setTransactionId(requestId);
+                detail.setLedgerId(ledger.getId());
+                detail.setAmount(deductAmount);
+                consumptionDetailRepository.save(detail);
+
+                remainingAmount = remainingAmount.subtract(deductAmount);
             }
 
-            // 5. 记录消费交易
+            // 6. Record consumption transaction
             CreditTransactionLog consumeLog = new CreditTransactionLog();
-            consumeLog.setUserId(reserveLog.getUserId());
+            consumeLog.setUserId(freeze.getUserId());
             consumeLog.setTransactionId(requestId);
             consumeLog.setType(CreditTransactionLog.TransactionType.CONSUME);
             consumeLog.setAmount(finalAmount);
@@ -303,7 +325,7 @@ public class CreditServiceImpl implements CreditService {
     @Transactional
     @CacheEvict(value = "userBalance", key = "#result.userId")
     public void cancelSession(String sessionId, String requestId) {
-        // 1. 幂等性检查
+        // 1. Idempotency check
         String lockKey = "credit:session:cancel:" + requestId;
         Boolean acquired = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", 24, TimeUnit.HOURS);
         if (Boolean.FALSE.equals(acquired)) {
@@ -311,28 +333,20 @@ public class CreditServiceImpl implements CreditService {
         }
 
         try {
-            // 2. 获取预留交易记录
-            CreditTransactionLog reserveLog = transactionLogRepository.findBySourceId(sessionId)
+            // 2. Get freeze record
+            CreditFreeze freeze = creditFreezeRepository.findBySessionId(sessionId)
                     .orElseThrow(() -> new CreditException("SESSION_NOT_FOUND", "Session not found"));
 
-            // 3. 恢复预留积分状态
-            List<CreditLedger> reservedLedgers = creditLedgerRepository
-                    .findByUserIdAndStatusAndExpiresAtAfterOrderByExpiresAtAsc(
-                            reserveLog.getUserId(),
-                            CreditLedger.CreditStatus.RESERVED,
-                            LocalDateTime.now());
+            // 3. Update freeze status
+            freeze.setStatus(CreditFreeze.FreezeStatus.CANCELLED);
+            creditFreezeRepository.save(freeze);
 
-            for (CreditLedger ledger : reservedLedgers) {
-                ledger.setStatus(CreditLedger.CreditStatus.ACTIVE);
-                creditLedgerRepository.save(ledger);
-            }
-
-            // 4. 记录取消交易
+            // 4. Record cancellation transaction
             CreditTransactionLog cancelLog = new CreditTransactionLog();
-            cancelLog.setUserId(reserveLog.getUserId());
+            cancelLog.setUserId(freeze.getUserId());
             cancelLog.setTransactionId(requestId);
             cancelLog.setType(CreditTransactionLog.TransactionType.CANCEL);
-            cancelLog.setAmount(reserveLog.getAmount());
+            cancelLog.setAmount(freeze.getAmount());
             cancelLog.setSourceType("SESSION");
             cancelLog.setSourceId(sessionId);
             transactionLogRepository.save(cancelLog);

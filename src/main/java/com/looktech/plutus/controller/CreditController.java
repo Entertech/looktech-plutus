@@ -3,6 +3,7 @@ package com.looktech.plutus.controller;
 import com.looktech.plutus.annotation.RateLimit;
 import com.looktech.plutus.domain.CreditTransactionLog;
 import com.looktech.plutus.dto.CreditGrantRequest;
+import com.looktech.plutus.dto.CreditDeductRequest;
 import com.looktech.plutus.service.CreditService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -83,12 +84,13 @@ public class CreditController {
     })
     @PostMapping("/deduct")
     @RateLimit(key = "deduct_credit", limit = 200, period = 60)
-    public ResponseEntity<CreditTransactionLog> deductCredit(
-            @Parameter(description = "User ID") @RequestParam Long userId,
-            @Parameter(description = "Amount to deduct") @RequestParam BigDecimal amount,
-            @Parameter(description = "Source type") @RequestParam String sourceType,
-            @Parameter(description = "Source ID") @RequestParam String sourceId,
-            @Parameter(description = "Request ID for idempotency") @RequestParam String requestId) {
-        return ResponseEntity.ok(creditService.deductCredit(userId, amount, sourceType, sourceId, requestId));
+    public ResponseEntity<CreditTransactionLog> deductCredit(@RequestBody CreditDeductRequest request) {
+        return ResponseEntity.ok(creditService.deductCredit(
+            request.getUserId(),
+            request.getAmount(),
+            request.getSourceType(),
+            request.getSourceId(),
+            request.getRequestId()
+        ));
     }
 } 

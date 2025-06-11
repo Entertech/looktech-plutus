@@ -1,6 +1,7 @@
 package com.looktech.plutus.service;
 
 import com.looktech.plutus.domain.CreditTransactionLog;
+import com.looktech.plutus.enums.SourceType;
 import org.springframework.data.domain.Page;
 
 import java.math.BigDecimal;
@@ -17,7 +18,7 @@ public interface CreditService {
      * @param expiresAt Expiration time
      * @return Transaction log
      */
-    CreditTransactionLog grantCredit(Long userId, BigDecimal amount, String sourceType, String sourceId, LocalDateTime expiresAt);
+    CreditTransactionLog grantCredit(Long userId, BigDecimal amount, SourceType sourceType, String sourceId, LocalDateTime expiresAt);
     
     /**
      * Start a new credit session and reserve credits
@@ -53,7 +54,7 @@ public interface CreditService {
      * @param requestId Unique request ID for idempotency
      * @return Transaction log
      */
-    CreditTransactionLog deductCredit(Long userId, BigDecimal amount, String sourceType, String sourceId, String requestId);
+    CreditTransactionLog deductCredit(Long userId, BigDecimal amount, SourceType sourceType, String sourceId, String requestId);
     
     /**
      * Get available balance for user

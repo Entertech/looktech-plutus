@@ -1,5 +1,6 @@
 package com.looktech.plutus.dto;
 
+import com.looktech.plutus.enums.SourceType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -16,7 +17,7 @@ public class CreditGrantRequest {
     private BigDecimal amount;
 
     @Schema(description = "Source type of the credit")
-    private String sourceType;
+    private SourceType sourceType;
 
     @Schema(description = "Source ID of the credit")
     private String sourceId;
