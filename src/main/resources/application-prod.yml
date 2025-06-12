@@ -1,0 +1,26 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  # Database Configuration
+  datasource:
+    url: jdbc:postgresql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}
+    username: ${MYSQL_USERNAME}
+    password: ${MYSQL_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  
+  # Redis Configuration
+  redis:
+    host: ${REDIS_HOST}
+    port: ${REDIS_PORT}
+    database: ${REDIS_DATABASE}
+    timeout: ${REDIS_TIMEOUT}
+
+# Custom Configuration
+credit:
+  reservation:
+    ttl-seconds: ${CREDIT_RESERVATION_TTL:3600}
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    window-seconds: ${RATE_LIMIT_WINDOW:60}
+    max-requests: ${RATE_LIMIT_MAX_REQUESTS:100} 

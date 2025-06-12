@@ -2,15 +2,13 @@ server:
   port: 8080
 
 spring:
-  application:
-    name: credit-service
   
   # Database Configuration
   datasource:
-    url: jdbc:mysql://localhost:3306/plutus?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-    username: root
-    password: secret
-    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:postgresql://localhost:5431/plutus
+    username: postgres
+    password: mysecretpassword
+    driver-class-name: org.postgresql.Driver
     hikari:
       minimum-idle: 5
       maximum-pool-size: 15
@@ -28,7 +26,7 @@ spring:
     properties:
       hibernate:
         format_sql: true
-        dialect: org.hibernate.dialect.MySQL8Dialect
+        dialect: org.hibernate.dialect.PostgreSQLDialect
         jdbc:
           batch_size: 50
           batch_versioned_data: true

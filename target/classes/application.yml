@@ -1,9 +1,9 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
 
 spring:
   application:
-    name: credit-service
+    name: looktech-plutus
   devtools:
     restart:
       enabled: true
@@ -12,10 +12,10 @@ spring:
   
   # Database Configuration
   datasource:
-    url: jdbc:mysql://localhost:3306/plutus?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-    username: root
-    password: secret
-    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:postgresql://${MYSQL_HOST:localhost}:${MYSQL_PORT:5432}/${MYSQL_DATABASE:plutus}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:secret}
+    driver-class-name: org.postgresql.Driver
   
   # JPA Configuration
   jpa:
@@ -25,23 +25,23 @@ spring:
     properties:
       hibernate:
         format_sql: true
-        dialect: org.hibernate.dialect.MySQL8Dialect
+        dialect: org.hibernate.dialect.PostgreSQLDialect
   
   # Redis Configuration
   redis:
-    host: localhost
-    port: 6379
-    database: 0
-    timeout: 10000
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    database: ${REDIS_DATABASE:0}
+    timeout: ${REDIS_TIMEOUT:10000}
 
 # Custom Configuration
 credit:
   reservation:
-    ttl-seconds: 3600  # 1 hour
+    ttl-seconds: ${CREDIT_RESERVATION_TTL:3600}  # 1 hour
   rate-limit:
-    enabled: true
-    window-seconds: 60
-    max-requests: 100
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    window-seconds: ${RATE_LIMIT_WINDOW:60}
+    max-requests: ${RATE_LIMIT_MAX_REQUESTS:100}
 
 springdoc:
   api-docs:

@@ -12,10 +12,19 @@
         },
         {
             "type": "java",
-            "name": "PlutusApplication",
+            "name": "PlutusApplication (dev)",
             "request": "launch",
             "mainClass": "com.looktech.plutus.PlutusApplication",
-            "projectName": "plutus"
+            "projectName": "plutus",
+            "vmArgs": "-Dspring.profiles.active=dev"
+        },
+        {
+            "type": "java",
+            "name": "PlutusApplication (prod)",
+            "request": "launch",
+            "mainClass": "com.looktech.plutus.PlutusApplication",
+            "projectName": "plutus",
+            "vmArgs": "-Dspring.profiles.active=prod"
         }
     ]
 }

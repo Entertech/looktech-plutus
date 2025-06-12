@@ -9,12 +9,12 @@
             },
             "previewLimit": 50,
             "server": "localhost",
-            "port": 3306,
+            "port": 5431,
             "driver": "MySQL",
             "name": "plutus",
             "database": "plutus",
-            "username": "root",
-            "password": "secret"
+            "username": "postgres",
+            "password": "mysecretpassword"
         }
     ]
 }
