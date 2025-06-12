@@ -33,6 +33,12 @@ spring:
     port: ${REDIS_PORT:6379}
     database: ${REDIS_DATABASE:0}
     timeout: ${REDIS_TIMEOUT:10000}
+  
+  # Disable Redis repositories
+  data:
+    redis:
+      repositories:
+        enabled: false
 
 # Custom Configuration
 credit:

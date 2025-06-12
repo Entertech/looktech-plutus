@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: plutus
-        image: plutus:latest
+        image: plutus:latest  
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080

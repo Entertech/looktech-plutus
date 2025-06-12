@@ -3,7 +3,7 @@ IMAGE_NAME = plutus
 IMAGE_TAG = 1.0.0
 TIMESTAMP := $(shell date +%Y%m%d%H%M%S)
 TAGGED_VERSION = $(IMAGE_TAG)-$(TIMESTAMP)
-K8S_NAMESPACE = default
+K8S_NAMESPACE = testing
 REGISTRY = 209479262408.dkr.ecr.us-east-1.amazonaws.com/looktech
 
 # 构建Docker镜像
