@@ -219,7 +219,7 @@ public class CreditServiceImpl implements CreditService {
                         response.setSessionId(log.getSourceId());
                         response.setUserId(log.getUserId());
                         response.setAmount(log.getAmount());
-                        response.setRequestId(idempotencyId);
+                        response.setIdempotencyId(idempotencyId);
                         return response;
                     })
                     .orElseThrow(() -> new CreditException("DUPLICATE_REQUEST", "Duplicate idempotency ID"));
@@ -266,7 +266,7 @@ public class CreditServiceImpl implements CreditService {
             response.setSessionId(sessionId);
             response.setUserId(userId);
             response.setAmount(maxAmount);
-            response.setRequestId(idempotencyId);
+            response.setIdempotencyId(idempotencyId);
             return response;
 
         } catch (Exception e) {

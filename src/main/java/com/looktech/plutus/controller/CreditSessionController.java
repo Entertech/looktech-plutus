@@ -1,6 +1,7 @@
 package com.looktech.plutus.controller;
 
 import com.looktech.plutus.domain.CreditTransactionLog;
+import com.looktech.plutus.domain.SettleSessionResponse;
 import com.looktech.plutus.dto.CreditSessionRequest;
 import com.looktech.plutus.dto.CreditSessionSettleRequest;
 import com.looktech.plutus.service.CreditService;
@@ -27,8 +28,7 @@ public class CreditSessionController {
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Session started successfully",
                     content = @Content(schema = @Schema(implementation = CreateSessionResponse.class))),
-        @ApiResponse(responseCode = "400", description = "Invalid input parameters"),
-        @ApiResponse(responseCode = "409", description = "Insufficient balance")
+        @ApiResponse(responseCode = "400", description = "Invalid input parameters, duplicate request, or insufficient balance")
     })
     @PostMapping("/start")
     public ResponseEntity<CreateSessionResponse> startSession(@RequestBody CreditSessionRequest request) {
@@ -42,21 +42,30 @@ public class CreditSessionController {
     @Operation(summary = "Settle a credit session", description = "Settle a credit session with final amount")
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Session settled successfully",
-                    content = @Content(schema = @Schema(implementation = CreditTransactionLog.class))),
-        @ApiResponse(responseCode = "400", description = "Invalid input parameters"),
-        @ApiResponse(responseCode = "404", description = "Session not found")
+                    content = @Content(schema = @Schema(implementation = SettleSessionResponse.class))),
+        @ApiResponse(responseCode = "400", description = "Invalid input parameters, duplicate operation, or session not found")
     })
     @PostMapping("/{sessionId}/settle")
-    public ResponseEntity<CreditTransactionLog> settleSession(
+    public ResponseEntity<SettleSessionResponse> settleSession(
             @Parameter(description = "Session ID") @PathVariable String sessionId,
             @RequestBody CreditSessionSettleRequest request) {
-        return ResponseEntity.ok(creditService.settleSession(sessionId, request.getFinalAmount()));
+        CreditTransactionLog transactionLog = creditService.settleSession(sessionId, request.getFinalAmount());
+        
+        SettleSessionResponse response = new SettleSessionResponse();
+        response.setSessionId(sessionId);
+        response.setUserId(transactionLog.getUserId());
+        response.setFinalAmount(transactionLog.getAmount());
+        response.setTransactionId(transactionLog.getTransactionId());
+        response.setType(transactionLog.getType());
+        response.setCreatedAt(transactionLog.getCreatedAt());
+        
+        return ResponseEntity.ok(response);
     }
 
     @Operation(summary = "Cancel a credit session", description = "Cancel a credit session and release reserved credits")
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Session cancelled successfully"),
-        @ApiResponse(responseCode = "404", description = "Session not found")
+        @ApiResponse(responseCode = "400", description = "Invalid session status or session not found")
     })
     @PostMapping("/{sessionId}/cancel")
     public ResponseEntity<Boolean> cancelSession(
