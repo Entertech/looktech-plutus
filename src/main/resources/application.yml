@@ -60,3 +60,10 @@ springdoc:
     filter: true
   packages-to-scan: com.looktech.plutus.controller
   paths-to-match: /api/** 
+# Logging Configuration
+logging:
+  level:
+    root: INFO
+    com.looktech.plutus: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE 
