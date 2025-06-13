@@ -156,7 +156,8 @@ public class CreditServiceImpl implements CreditService {
             // 3. Check balance
             BigDecimal availableBalance = getAvailableBalance(userId);
             if (availableBalance.compareTo(amount) < 0) {
-                throw new CreditException("INSUFFICIENT_BALANCE", "Insufficient credit balance");
+                log.error("Insufficient credit balance: availableBalance={}, amount={}, userId={}", availableBalance, amount, userId);
+                amount=availableBalance;
             }
 
             // 4. Get available credit batches (sorted by expiration time)
@@ -502,7 +503,7 @@ public class CreditServiceImpl implements CreditService {
         if (!userIds.isEmpty()) {
             redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
                 for (Long userId : userIds) {
-                    connection.del(("userBalance::" + userId).getBytes());
+                    connection.keyCommands().del(("userBalance::" + userId).getBytes());
                 }
                 return null;
             });
