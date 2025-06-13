@@ -6,6 +6,9 @@ import com.looktech.plutus.domain.UserCreditSummary;
 import com.looktech.plutus.domain.CreditConsumptionDetail;
 import com.looktech.plutus.domain.CreditFreeze;
 import com.looktech.plutus.domain.CreateSessionResponse;
+import com.looktech.plutus.dto.BatchCreditGrantRequest;
+import com.looktech.plutus.dto.BatchCreditGrantResponse;
+import com.looktech.plutus.dto.CreditGrantResponse;
 import com.looktech.plutus.enums.SourceType;
 import com.looktech.plutus.exception.CreditException;
 import com.looktech.plutus.repository.*;
@@ -15,6 +18,7 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +28,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.ArrayList;
+import java.util.Set;
+import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
@@ -297,8 +304,6 @@ public class CreditServiceImpl implements CreditService {
             }
             if (finalAmount.compareTo(freeze.getAmount()) > 0) {
                 log.error("Final amount exceeds frozen amount: finalAmount={}, freezeAmount={}, sessionId={}", finalAmount, freeze.getAmount(), sessionId);
-                finalAmount=freeze.getAmount();
-                freeze.setAmount(finalAmount);
             }
             // 4. Update freeze status
             freeze.setStatus(CreditFreeze.FreezeStatus.CONSUMED);
@@ -404,5 +409,110 @@ public class CreditServiceImpl implements CreditService {
             redisTemplate.delete(lockKey);
             throw e;
         }
+    }
+
+    @Override
+    @Transactional
+    public BatchCreditGrantResponse batchGrantCredit(List<BatchCreditGrantRequest.CreditGrantItem> items) {
+        // 收集所有需要清除缓存的用户ID
+        Set<Long> userIds = items.stream()
+            .map(BatchCreditGrantRequest.CreditGrantItem::getUserId)
+            .collect(Collectors.toSet());
+        
+        // 批量处理
+        List<CreditGrantResponse> successResults = new ArrayList<>();
+        List<BatchCreditGrantResponse.FailedGrantResult> failResults = new ArrayList<>();
+        
+        // 使用批量插入优化数据库操作
+        List<CreditLedger> ledgers = new ArrayList<>();
+        List<UserCreditSummary> summaries = new ArrayList<>();
+        List<CreditTransactionLog> logs = new ArrayList<>();
+        
+        // 使用Redis Pipeline批量处理锁
+        redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+            for (BatchCreditGrantRequest.CreditGrantItem item : items) {
+                String lockKey = String.format("credit:grant:%d:%s", item.getUserId(), item.getIdempotencyId());
+                connection.stringCommands().setNX(lockKey.getBytes(), "1".getBytes());
+                connection.keyCommands().expire(lockKey.getBytes(), 24 * 3600); // 24小时过期
+            }
+            return null;
+        });
+        
+        for (BatchCreditGrantRequest.CreditGrantItem item : items) {
+            try {
+                // 检查幂等性
+                String lockKey = String.format("credit:grant:%d:%s", item.getUserId(), item.getIdempotencyId());
+                if (Boolean.FALSE.equals(redisTemplate.hasKey(lockKey))) {
+                    throw new CreditException("DUPLICATE_REQUEST", "Duplicate idempotency ID");
+                }
+                
+                // 构建对象但不立即保存
+                CreditLedger ledger = new CreditLedger();
+                ledger.setUserId(item.getUserId());
+                ledger.setRemainingAmount(item.getAmount());
+                ledger.setStatus(CreditLedger.CreditStatus.ACTIVE);
+                ledger.setSourceType(item.getSourceType().toString());
+                ledger.setSourceId(item.getSourceId());
+                ledger.setExpiresAt(item.getExpiresAt());
+                
+                UserCreditSummary summary = userCreditSummaryRepository.findByUserId(item.getUserId())
+                    .orElseGet(() -> {
+                        UserCreditSummary newSummary = new UserCreditSummary();
+                        newSummary.setUserId(item.getUserId());
+                        newSummary.setTotalBalance(BigDecimal.ZERO);
+                        return newSummary;
+                    });
+                summary.setTotalBalance(summary.getTotalBalance().add(item.getAmount()));
+                
+                CreditTransactionLog log = new CreditTransactionLog();
+                log.setUserId(item.getUserId());
+                log.setTransactionId(item.getIdempotencyId());
+                log.setType(CreditTransactionLog.TransactionType.GRANT);
+                log.setAmount(item.getAmount());
+                log.setSourceType(item.getSourceType().toString());
+                log.setSourceId(item.getSourceId());
+                
+                ledgers.add(ledger);
+                summaries.add(summary);
+                logs.add(log);
+                
+                successResults.add(CreditGrantResponse.fromTransactionLog(log));
+            } catch (Exception e) {
+                log.error("Failed to grant credit for user {}: {}", item.getUserId(), e.getMessage());
+                failResults.add(BatchCreditGrantResponse.FailedGrantResult.builder()
+                    .userId(item.getUserId())
+                    .errorCode(e instanceof CreditException ? ((CreditException) e).getCode() : "UNKNOWN_ERROR")
+                    .errorMessage(e.getMessage())
+                    .build());
+            }
+        }
+        
+        // 批量保存
+        if (!ledgers.isEmpty()) {
+            creditLedgerRepository.saveAll(ledgers);
+        }
+        if (!summaries.isEmpty()) {
+            userCreditSummaryRepository.saveAll(summaries);
+        }
+        if (!logs.isEmpty()) {
+            transactionLogRepository.saveAll(logs);
+        }
+        
+        // 最后一次性清除所有相关用户的缓存
+        if (!userIds.isEmpty()) {
+            redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                for (Long userId : userIds) {
+                    connection.del(("userBalance::" + userId).getBytes());
+                }
+                return null;
+            });
+        }
+        
+        return BatchCreditGrantResponse.builder()
+            .successCount(successResults.size())
+            .failCount(failResults.size())
+            .successResults(successResults)
+            .failResults(failResults)
+            .build();
     }
 } 

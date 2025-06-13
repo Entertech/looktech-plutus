@@ -2,8 +2,7 @@ package com.looktech.plutus.controller;
 
 import com.looktech.plutus.annotation.RateLimit;
 import com.looktech.plutus.domain.CreditTransactionLog;
-import com.looktech.plutus.dto.CreditGrantRequest;
-import com.looktech.plutus.dto.CreditDeductRequest;
+import com.looktech.plutus.dto.*;
 import com.looktech.plutus.service.CreditService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -18,6 +17,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/credits")
@@ -30,21 +30,22 @@ public class CreditController {
     @Operation(summary = "Grant credits to user", description = "Grant credits to a user with specified amount and expiration time")
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Credits granted successfully",
-                    content = @Content(schema = @Schema(implementation = CreditTransactionLog.class))),
+                    content = @Content(schema = @Schema(implementation = CreditGrantResponse.class))),
         @ApiResponse(responseCode = "400", description = "Invalid input parameters"),
         @ApiResponse(responseCode = "429", description = "Rate limit exceeded")
     })
     @PostMapping("/grant")
     @RateLimit(key = "grant_credit", limit = 100, period = 60)
-    public ResponseEntity<CreditTransactionLog> grantCredit(@RequestBody CreditGrantRequest request) {
-        return ResponseEntity.ok(creditService.grantCredit(
+    public ResponseEntity<CreditGrantResponse> grantCredit(@RequestBody CreditGrantRequest request) {
+        CreditTransactionLog log = creditService.grantCredit(
             request.getUserId(),
             request.getAmount(),
             request.getSourceType(),
             request.getSourceId(),
             request.getExpiresAt(),
             request.getIdempotencyId()
-        ));
+        );
+        return ResponseEntity.ok(CreditGrantResponse.fromTransactionLog(log));
     }
 
     @Operation(summary = "Get user's available balance", description = "Get the available credit balance for a user")
@@ -93,5 +94,18 @@ public class CreditController {
             request.getSourceId(),
             request.getIdempotencyId()
         ));
+    }
+
+    @Operation(summary = "Batch grant credits to users", description = "Grant credits to multiple users with specified amounts and expiration times")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Credits granted successfully",
+                    content = @Content(schema = @Schema(implementation = BatchCreditGrantResponse.class))),
+        @ApiResponse(responseCode = "400", description = "Invalid input parameters"),
+        @ApiResponse(responseCode = "429", description = "Rate limit exceeded")
+    })
+    @PostMapping("/batch-grant")
+    @RateLimit(key = "batch_grant_credit", limit = 50, period = 60)
+    public ResponseEntity<BatchCreditGrantResponse> batchGrantCredit(@RequestBody BatchCreditGrantRequest request) {
+        return ResponseEntity.ok(creditService.batchGrantCredit(request.getItems()));
     }
 } 
