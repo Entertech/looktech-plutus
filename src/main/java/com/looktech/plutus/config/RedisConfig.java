@@ -4,6 +4,8 @@ import io.lettuce.core.RedisURI;
 import io.lettuce.core.cluster.RedisClusterClient;
 import io.lettuce.core.cluster.api.StatefulRedisClusterConnection;
 import io.lettuce.core.cluster.api.sync.RedisAdvancedClusterCommands;
+import io.lettuce.core.ClientOptions;
+import io.lettuce.core.SslOptions;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,6 +14,7 @@ import org.springframework.data.redis.cache.RedisCacheManager;
 import org.springframework.data.redis.connection.RedisClusterConfiguration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
+import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
@@ -45,17 +48,33 @@ public class RedisConfig {
 
     private RedisConnectionFactory createClusterConnectionFactory() {
         String clusterNodes = environment.getProperty("spring.redis.cluster.nodes");
+        if (clusterNodes == null || clusterNodes.trim().isEmpty()) {
+            throw new IllegalStateException("Redis cluster nodes configuration is missing");
+        }
         String password = environment.getProperty("spring.redis.password");
+        boolean sslEnabled = Boolean.parseBoolean(environment.getProperty("spring.redis.ssl", "false"));
         
         log.info("Initializing Redis Cluster Connection Factory");
         log.info("Cluster Nodes: {}", clusterNodes);
+        log.info("SSL Enabled: {}", sslEnabled);
         
         RedisClusterConfiguration clusterConfig = new RedisClusterConfiguration(Arrays.asList(clusterNodes.split(",")));
         if (password != null && !password.isEmpty()) {
             clusterConfig.setPassword(password);
         }
+
+        LettuceClientConfiguration clientConfig = LettuceClientConfiguration.builder()
+                .commandTimeout(Duration.ofMillis(Long.parseLong(environment.getProperty("spring.redis.timeout", "10000"))))
+                .build();
+
+        if (sslEnabled) {
+            clientConfig = LettuceClientConfiguration.builder()
+                    .commandTimeout(Duration.ofMillis(Long.parseLong(environment.getProperty("spring.redis.timeout", "10000"))))
+                    .useSsl()
+                    .build();
+        }
         
-        return new LettuceConnectionFactory(clusterConfig);
+        return new LettuceConnectionFactory(clusterConfig, clientConfig);
     }
 
     private RedisConnectionFactory createStandaloneConnectionFactory() {
@@ -63,17 +82,29 @@ public class RedisConfig {
         int port = Integer.parseInt(environment.getProperty("spring.redis.port", "6379"));
         String password = environment.getProperty("spring.redis.password");
         int database = Integer.parseInt(environment.getProperty("spring.redis.database", "0"));
+        boolean sslEnabled = Boolean.parseBoolean(environment.getProperty("spring.redis.ssl", "false"));
         
         log.info("Initializing Redis Standalone Connection Factory");
-        log.info("Host: {}, Port: {}, Database: {}", host, port, database);
+        log.info("Host: {}, Port: {}, Database: {}, SSL: {}", host, port, database, sslEnabled);
         
         RedisStandaloneConfiguration config = new RedisStandaloneConfiguration(host, port);
         config.setDatabase(database);
         if (password != null && !password.isEmpty()) {
             config.setPassword(password);
         }
+
+        LettuceClientConfiguration clientConfig = LettuceClientConfiguration.builder()
+                .commandTimeout(Duration.ofMillis(Long.parseLong(environment.getProperty("spring.redis.timeout", "10000"))))
+                .build();
+
+        if (sslEnabled) {
+            clientConfig = LettuceClientConfiguration.builder()
+                    .commandTimeout(Duration.ofMillis(Long.parseLong(environment.getProperty("spring.redis.timeout", "10000"))))
+                    .useSsl()
+                    .build();
+        }
         
-        return new LettuceConnectionFactory(config);
+        return new LettuceConnectionFactory(config, clientConfig);
     }
 
     @Bean
