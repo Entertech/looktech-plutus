@@ -9,20 +9,6 @@ spring:
     username: postgres
     password: mysecretpassword
     driver-class-name: org.postgresql.Driver
-  
-  
-  # Redis Configuration
-  redis:
-    host: localhost
-    port: 6379
-    database: 0
-    timeout: 10000
-    lettuce:
-      pool:
-        max-active: 8
-        max-idle: 8
-        min-idle: 0
-        max-wait: -1ms
 
 # Custom Configuration
 credit:

@@ -25,14 +25,28 @@ spring:
     properties:
       hibernate:
         format_sql: true
-        dialect: org.hibernate.dialect.PostgreSQLDialect
   
   # Redis Configuration
   redis:
+    # 集群模式配置
+    cluster:
+      enabled: ${REDIS_CLUSTER_ENABLED:false}
+      nodes: ${REDIS_CLUSTER_NODES:ai-agent-cidor4.serverless.use1.cache.amazonaws.com:6379}
+    # 单节点模式配置（本地开发环境）
     host: ${REDIS_HOST:localhost}
     port: ${REDIS_PORT:6379}
     database: ${REDIS_DATABASE:0}
     timeout: ${REDIS_TIMEOUT:10000}
+    # 通用配置
+    password: ${REDIS_PASSWORD:}
+    ssl: ${REDIS_SSL:false}
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+        max-wait: -1ms
+      shutdown-timeout: 100ms
   
   # Disable Redis repositories
   data:

@@ -59,4 +59,11 @@
     <!-- SQL Logger -->
     <logger name="org.hibernate.SQL" level="DEBUG"/>
     <logger name="org.hibernate.type.descriptor.sql.BasicBinder" level="TRACE"/>
+
+    <!-- Redis Logger -->
+    <logger name="org.springframework.data.redis" level="DEBUG"/>
+    <logger name="io.lettuce.core" level="DEBUG"/>
+    <logger name="org.springframework.boot.context.config" level="TRACE"/>
+    <logger name="org.springframework.boot.env" level="TRACE"/>
+    <logger name="org.springframework.boot.autoconfigure" level="DEBUG"/>
 </configuration> 
